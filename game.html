@@ -2,42 +2,78 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>3D Dungeon RPG</title>
+    <title>3D Dungeon RPG - JRPG Style</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
         canvas { display: block; }
         
         /* UI для исследования */
-        #explore-ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; }
+        #explore-ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; text-shadow: 2px 2px 0 #000; }
         
-        /* UI для пошаговой битвы */
-        #battle-ui { 
-            position: absolute; bottom: 0; left: 0; width: 100%; height: 200px; 
-            background: rgba(0, 0, 0, 0.85); border-top: 3px solid #aaa;
-            display: none; color: white; padding: 20px; box-sizing: border-box;
+        /* UI для пошаговой битвы в стиле JRPG */
+        #battle-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: none; flex-direction: column; justify-content: space-between;
+            padding: 40px; box-sizing: border-box;
         }
-        .battle-btn {
-            padding: 15px 30px; font-size: 20px; cursor: pointer; 
-            background: #333; color: white; border: 2px solid #888; margin-right: 10px;
+        .battle-arena {
+            display: flex; justify-content: space-between; align-items: center; height: 60%;
         }
-        .battle-btn:hover { background: #555; }
-        #battle-log { margin-top: 15px; font-size: 18px; color: #ffaa00; }
+        .combatant {
+            width: 150px; height: 150px; display: flex; align-items: center; justify-content: center;
+            font-size: 80px; background: rgba(255,255,255,0.1); border-radius: 10px;
+            transition: transform 0.2s;
+        }
+        .combatant.hit { transform: translateX(20px); background: rgba(255,0,0,0.3); }
+        
+        .battle-ui-panel {
+            background: #222; border: 2px solid #555; border-radius: 10px; padding: 20px;
+            display: flex; justify-content: space-between; align-items: flex-start;
+        }
+        .action-buttons { display: flex; flex-direction: column; gap: 10px; }
+        .action-btn {
+            padding: 10px 20px; font-size: 18px; cursor: pointer; background: #444; color: white; border: none; border-radius: 5px;
+        }
+        .action-btn:hover { background: #666; }
+        .action-btn:disabled { background: #222; color: #555; cursor: not-allowed; }
+        
+        .stats-panel { color: white; font-size: 20px; }
+        .hp-bar { width: 200px; height: 15px; background: #333; margin-top: 5px; border-radius: 3px; overflow: hidden; }
+        .hp-fill { height: 100%; background: #4CAF50; transition: width 0.3s; }
+        .ap-text { margin-top: 10px; color: #ffaa00; }
     </style>
 </head>
 <body>
     <div id="explore-ui">
         <h2>Подземелье</h2>
-        <p>WASD - движение</p>
-        <p style="color: #ff4444">Столкнись с красным кубом!</p>
+        <p>W/S - Вперёд/Назад | A/D - Поворот</p>
+        <p>Мышь (зажав) - Камера</p>
     </div>
 
-    <div id="battle-ui">
-        <h2>ПОШАГОВАЯ БИТВА</h2>
-        <div>
-            <button class="battle-btn" onclick="playerAction('attack')">⚔️ Атака</button>
-            <button class="battle-btn" onclick="playerAction('flee')">🏃 Бегство</button>
+    <div id="battle-screen">
+        <div class="battle-arena">
+            <div class="combatant" id="player-sprite">⚔️</div>
+            <div style="font-size: 40px; color: #555;">VS</div>
+            <div class="combatant" id="enemy-sprite">👹</div>
         </div>
-        <div id="battle-log">Ваш ход!</div>
+        
+        <div class="battle-ui-panel">
+            <div class="action-buttons" id="action-buttons">
+                <!-- Кнопки будут генерироваться скриптом -->
+            </div>
+            
+            <div class="stats-panel">
+                <div>Воин: <span id="player-hp-text">100/100</span></div>
+                <div class="hp-bar"><div class="hp-fill" id="player-hp-bar" style="width: 100%"></div></div>
+                <div class="ap-text">ОДН (Навыки): <span id="ap-skill">4</span> | ООД (Атака): <span id="ap-basic">2</span></div>
+                
+                <div style="margin-top: 20px; color: #ff4444;">Враг: <span id="enemy-hp-text">50/50</span></div>
+                <div class="hp-bar"><div class="hp-fill" id="enemy-hp-bar" style="width: 100%; background: #f44336;"></div></div>
+                
+                <div id="battle-log" style="margin-top: 15px; color: #fff; font-size: 16px; min-height: 40px;"></div>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -46,198 +82,282 @@
         // --- 1. НАСТРОЙКА 3D ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x111111);
-        scene.fog = new THREE.Fog(0x111111, 10, 25); // Туман для атмосферы
+        scene.fog = new THREE.FogExp2(0x111111, 0.05);
 
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 12, 12);
-        camera.lookAt(0, 0, 0);
-
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
         // Свет
-        scene.add(new THREE.AmbientLight(0x404040, 0.3));
-        const torchLight = new THREE.PointLight(0xffaa00, 1.5, 20);
-        torchLight.position.set(0, 3, 0);
+        scene.add(new THREE.AmbientLight(0x404040, 0.4));
+        const torchLight = new THREE.PointLight(0xffaa00, 1.5, 25);
         torchLight.castShadow = true;
         scene.add(torchLight);
 
         // Пол
         const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(30, 30),
+            new THREE.PlaneGeometry(40, 40),
             new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9 })
         );
-        floor.rotation.x = -Math.PI / 2;
-        floor.receiveShadow = true;
+        floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
         scene.add(floor);
 
-        // Стены (кубики для декора)
+        // Стены
         const wallMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
-        for (let i = -10; i <= 10; i += 2) {
-            addWall(i, -10);
-            addWall(i, 10);
-            addWall(-10, i);
-            addWall(10, i);
+        for (let i = -15; i <= 15; i += 3) {
+            addWall(i, -15); addWall(i, 15); addWall(-15, i); addWall(15, i);
         }
         function addWall(x, z) {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), wallMat);
-            wall.position.set(x, 1, z);
-            wall.castShadow = true; wall.receiveShadow = true;
-            scene.add(wall);
+            const w = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), wallMat);
+            w.position.set(x, 1.5, z); w.castShadow = true; w.receiveShadow = true; scene.add(w);
         }
 
-        // --- 2. ИГРОК И МОБ ---
-        const player = new THREE.Mesh(
-            new THREE.BoxGeometry(0.8, 1.2, 0.8),
-            new THREE.MeshStandardMaterial({ color: 0x4CAF50 })
+        // Игрок
+        const playerGroup = new THREE.Group(); // Группа для вращения
+        const playerMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.8, 1.5, 0.8),
+            new THREE.MeshStandardMaterial({ color: 0x2196F3 })
         );
-        player.position.y = 0.6;
-        player.castShadow = true;
-        scene.add(player);
+        playerMesh.position.y = 0.75; playerMesh.castShadow = true;
+        playerGroup.add(playerMesh);
+        scene.add(playerGroup);
 
-        const enemy = new THREE.Mesh(
-            new THREE.BoxGeometry(1, 1.5, 1),
+        // Враг
+        const enemyMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 1.8, 1.2),
             new THREE.MeshStandardMaterial({ color: 0xCC0000 })
         );
-        enemy.position.set(4, 0.75, 2);
-        enemy.castShadow = true;
-        scene.add(enemy);
+        enemyMesh.position.set(8, 0.9, -5); enemyMesh.castShadow = true;
+        scene.add(enemyMesh);
 
-        // --- 3. ЛОГИКА ИГРЫ ---
-        let gameState = 'explore'; // 'explore' или 'battle'
+        // --- 2. УПРАВЛЕНИЕ (Вид из-за плеча) ---
         let keys = {};
-        let playerHP = 100;
-        let enemyHP = 50;
+        let cameraAngleY = 0; // Угол камеры вокруг игрока
+        let isDragging = false;
+        let prevMouseX = 0;
 
         window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
         window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-
-        // --- 4. ОБНОВЛЕНИЕ (ГЕЙМПЛЕЙ) ---
-        function update() {
-            if (gameState === 'explore') {
-                updateExploration();
-                checkBattleStart();
+        
+        // Камера мышкой
+        renderer.domElement.addEventListener('mousedown', () => isDragging = true);
+        window.addEventListener('mouseup', () => isDragging = false);
+        window.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                cameraAngleY -= e.movementX * 0.005; // Чувствительность мыши
             }
-            
-            // Камера плавно следует за игроком
-            camera.position.x += (player.position.x - camera.position.x + 5) * 0.05;
-            camera.position.z += (player.position.z - camera.position.z + 8) * 0.05;
-            camera.lookAt(player.position.x, 0, player.position.z);
+        });
 
-            torchLight.position.x = player.position.x;
-            torchLight.position.z = player.position.z;
-        }
+        // --- 3. ЛОГИКА БОЯ (Твоя Система!) ---
+        let gameState = 'explore';
+        
+        // Статы игрока
+        let playerHP = 100, maxPlayerHP = 100;
+        let apSkill = 4, apBasic = 2;
+        
+        // Статы врага
+        let enemyHP = 80, maxEnemyHP = 80;
+        let enemyShield = 0; // Щит врага (если добавим)
 
         function updateExploration() {
-            const speed = 0.1;
+            const speed = 0.15;
+            const rotSpeed = 0.05;
+
+            // Поворот персонажа (A/D)
+            if (keys['a'] || keys['ф']) playerGroup.rotation.y += rotSpeed;
+            if (keys['d'] || keys['в']) playerGroup.rotation.y -= rotSpeed;
+
+            // Движение вперед/назад (W/S) относительно того, куда смотрит игрок
             let moveX = 0, moveZ = 0;
+            if (keys['w'] || keys['ц']) {
+                moveX -= Math.sin(playerGroup.rotation.y) * speed;
+                moveZ -= Math.cos(playerGroup.rotation.y) * speed; // Минус, потому что в Three.js вперед это -Z
+            }
+            if (keys['s'] || keys['ы']) {
+                moveX += Math.sin(playerGroup.rotation.y) * speed;
+                moveZ += Math.cos(playerGroup.rotation.y) * speed;
+            }
 
-            if (keys['w'] || keys['ц']) moveZ = -speed;
-            if (keys['s'] || keys['ы']) moveZ = speed;
-            if (keys['a'] || keys['ф']) moveX = -speed;
-            if (keys['d'] || keys['в']) moveX = speed;
+            let nextX = playerGroup.position.x + moveX;
+            let nextZ = playerGroup.position.z + moveZ;
+            if (nextX > -14 && nextX < 14) playerGroup.position.x = nextX;
+            if (nextZ > -14 && nextZ < 14) playerGroup.position.z = nextZ;
 
-            // Простая проверка столкновений со стенами (чтобы не выходить за границы 9х9)
-            let nextX = player.position.x + moveX;
-            let nextZ = player.position.z + moveZ;
-            if (nextX > -9 && nextX < 9) player.position.x = nextX;
-            if (nextZ > -9 && nextZ < 9) player.position.z = nextZ;
-        }
+            // Камера из-за плеча
+            const cameraDistance = 5;
+            const cameraHeight = 3;
+            // Позиция камеры зависит от угла, который мы крутим мышкой
+            const camX = playerGroup.position.x + Math.sin(cameraAngleY) * cameraDistance;
+            const camZ = playerGroup.position.z + Math.cos(cameraAngleY) * cameraDistance;
+            
+            camera.position.lerp(new THREE.Vector3(camX, playerGroup.position.y + cameraHeight, camZ), 0.1);
+            camera.lookAt(playerGroup.position.x, playerGroup.position.y + 1, playerGroup.position.z);
 
-        function checkBattleStart() {
-            const dist = Math.hypot(player.position.x - enemy.position.x, player.position.z - enemy.position.z);
-            if (dist < 1.5) {
+            torchLight.position.set(playerGroup.position.x, 3, playerGroup.position.z);
+
+            // Проверка столкновения с врагом
+            const dist = Math.hypot(playerGroup.position.x - enemyMesh.position.x, playerGroup.position.z - enemyMesh.position.z);
+            if (dist < 2 && enemyHP > 0) {
                 startBattle();
             }
         }
 
-        // --- 5. ПОШАГОВАЯ БИТВА ---
+        // --- БОЕВАЯ СИСТЕМА ---
         function startBattle() {
             gameState = 'battle';
+            apSkill = 4; apBasic = 2; // Восстанавливаем при старте боя
             document.getElementById('explore-ui').style.display = 'none';
-            document.getElementById('battle-ui').style.display = 'block';
-            document.getElementById('battle-log').innerText = "Враг впереди! Ваш ход.";
-            
-            // Слегка откидываем игрока назад, чтобы не застревать в мобе
-            player.position.z -= 1;
+            document.getElementById('battle-screen').style.display = 'flex';
+            updateBattleUI();
+            logBattle("Бой начался! Ваш ход.");
+            generateActions();
         }
 
-        window.playerAction = function(action) {
-            if (gameState !== 'battle') return;
+        function generateActions() {
+            const btns = document.getElementById('action-buttons');
+            btns.innerHTML = '';
 
-            if (action === 'attack') {
-                const damage = Math.floor(Math.random() * 20) + 10; // 10-30 урона
-                enemyHP -= damage;
-                document.getElementById('battle-log').innerText = `Вы ударили врага на ${damage} урона! (У врага: ${Math.max(0, enemyHP)} ХП)`;
+            // Обычная атака (тратит ООД, дает ОДН)
+            if (apBasic > 0) {
+                const btn = createBtn("🗡️ Обычная атака (1 ООД)", () => doPlayerTurn('basic'));
+                btns.appendChild(btn);
+            }
+            // Скиллы Воина (тратят ОДН)
+            if (apSkill >= 2) {
+                const btn2 = createBtn("🪓 Сильная атака (2 ОДН)", () => doPlayerTurn('strong'));
+                btns.appendChild(btn2);
+                const btn3 = createBtn("🛡️ Щит (2 ОДН)", () => doPlayerTurn('shield'));
+                btns.appendChild(btn3);
+            }
+            
+            if (apBasic <= 0 && apSkill < 2) {
+                logBattle("У вас не хватает очков. Конец хода...");
+                setTimeout(endPlayerTurn, 1000);
+            }
+        }
 
-                if (enemyHP <= 0) {
-                    setTimeout(() => endBattle(true), 1000);
-                    return;
-                }
-                
-                // Ход врага (задержка для эффекта)
-                setTimeout(enemyTurn, 1000);
+        function createBtn(text, onClick) {
+            const btn = document.createElement('button');
+            btn.className = 'action-btn'; btn.innerText = text;
+            btn.onclick = onClick;
+            return btn;
+        }
 
-            } else if (action === 'flee') {
-                const success = Math.random() > 0.5; // 50% шанс сбежать
-                if (success) {
-                    document.getElementById('battle-log').innerText = "Вы сбежали!";
-                    setTimeout(() => endBattle(false), 1000);
-                } else {
-                    document.getElementById('battle-log').innerText = "Сбежать не удалось!";
-                    setTimeout(enemyTurn, 1000);
-                }
+        function doPlayerTurn(action) {
+            let damage = 0;
+            let logMsg = "";
+
+            if (action === 'basic') {
+                damage = Math.floor(Math.random() * 10) + 5;
+                apBasic -= 1;
+                apSkill = Math.min(4, apSkill + 1); // Восстанавливаем 1 ОДН
+                logMsg = `Вы ударили! -${damage} Урон. +1 ОДН.`;
+            } else if (action === 'strong') {
+                damage = Math.floor(Math.random() * 20) + 15;
+                apSkill -= 2;
+                logMsg = `Сильная атака! -${damage} Урон.`;
+            } else if (action === 'shield') {
+                apSkill -= 2;
+                logMsg = `Вы ставите Щит! Урон врага снижен.`;
+                // Для простоты: просто отразим часть урона в логике врага
+                window.playerShieldActive = true;
             }
 
-            // Блокируем кнопки на время хода
-            document.querySelectorAll('.battle-btn').forEach(btn => btn.disabled = true);
-        };
+            enemyHP -= damage;
+            animateHit('enemy-sprite');
+            logBattle(logMsg);
+            updateBattleUI();
+
+            if (enemyHP <= 0) {
+                logBattle("Враг повержен! Победа!");
+                setTimeout(endBattle, 2000);
+            } else {
+                // Продолжить ход или конец?
+                if (apBasic <= 0 && apSkill < 2) {
+                    setTimeout(endPlayerTurn, 1000);
+                } else {
+                    generateActions(); // Обновляем кнопки
+                }
+            }
+        }
+
+        function endPlayerTurn() {
+            window.playerShieldActive = false; // Щит держится до конца хода врага
+            logBattle("Ход врага...");
+            disableActions();
+            setTimeout(enemyTurn, 1500);
+        }
 
         function enemyTurn() {
-            const damage = Math.floor(Math.random() * 15) + 5; // 5-20 урона
+            let damage = Math.floor(Math.random() * 15) + 10;
+            if (window.playerShieldActive) {
+                damage = Math.floor(damage * 0.3); // Щит режет 70%
+                logBattle(`Враг бьет, но Щит блокирует! Вы получили ${damage} урона.`);
+            } else {
+                logBattle(`Враг атакует! Вы получили ${damage} урона.`);
+            }
+            
             playerHP -= damage;
-            document.getElementById('battle-log').innerText = `Враг ударил вас на ${damage} урона! (У вас: ${Math.max(0, playerHP)} ХП)`;
+            animateHit('player-sprite');
+            updateBattleUI();
 
             if (playerHP <= 0) {
+                logBattle("Вы погибли...");
                 setTimeout(() => {
-                    alert("Вы погибли! Игра начнется заново.");
-                    playerHP = 100; enemyHP = 50;
-                    endBattle(false);
-                }, 1000);
+                    alert("Game Over!"); 
+                    playerHP = maxPlayerHP; enemyHP = maxEnemyHP;
+                    endBattle();
+                }, 1500);
             } else {
-                // Разблокируем кнопки для следующего хода игрока
-                document.querySelectorAll('.battle-btn').forEach(btn => btn.disabled = false);
+                // Новый ход
+                apBasic = 2; // Восстанавливаем ООД
+                logBattle("Ваш ход. ООД восстановлены.");
+                updateBattleUI();
+                generateActions();
             }
         }
 
-        function endBattle(enemyKilled) {
+        function animateHit(id) {
+            const el = document.getElementById(id);
+            el.classList.add('hit');
+            setTimeout(() => el.classList.remove('hit'), 200);
+        }
+
+        function updateBattleUI() {
+            document.getElementById('ap-skill').innerText = apSkill;
+            document.getElementById('ap-basic').innerText = apBasic;
+            document.getElementById('player-hp-text').innerText = `${Math.max(0,playerHP)}/${maxPlayerHP}`;
+            document.getElementById('player-hp-bar').style.width = `${Math.max(0, (playerHP/maxPlayerHP)*100)}%`;
+            document.getElementById('enemy-hp-text').innerText = `${Math.max(0,enemyHP)}/${maxEnemyHP}`;
+            document.getElementById('enemy-hp-bar').style.width = `${Math.max(0, (enemyHP/maxEnemyHP)*100)}%`;
+        }
+        
+        function logBattle(msg) { document.getElementById('battle-log').innerText = msg; }
+        function disableActions() { document.querySelectorAll('.action-btn').forEach(b => b.disabled = true); }
+
+        function endBattle() {
             gameState = 'explore';
             document.getElementById('explore-ui').style.display = 'block';
-            document.getElementById('battle-ui').style.display = 'none';
-            document.querySelectorAll('.battle-btn').forEach(btn => btn.disabled = false);
-
-            if (enemyKilled) {
-                scene.remove(enemy); // Убираем моба с 3D-карты
-                // В мультиплеере здесь Хост отправит: { type: 'enemy_dead', id: 1 }
-            }
+            document.getElementById('battle-screen').style.display = 'none';
+            if (enemyHP <= 0) scene.remove(enemyMesh);
+            playerGroup.position.z += 2; // Отходим от места боя
         }
 
-        // --- 6. ГЛАВНЫЙ ЦИКЛ ---
+        // --- 4. ГЛАВНЫЙ ЦИКЛ ---
         function animate() {
             requestAnimationFrame(animate);
-            update();
-            
-            // Простая анимация врага (парение)
-            if (enemy.parent) {
-                enemy.position.y = 0.75 + Math.sin(Date.now() * 0.005) * 0.2;
-                enemy.rotation.y += 0.02;
+            if (gameState === 'explore') {
+                updateExploration();
+                if (enemyMesh.parent) {
+                    enemyMesh.position.y = 0.9 + Math.sin(Date.now() * 0.003) * 0.2;
+                    enemyMesh.rotation.y += 0.01;
+                }
             }
-
             renderer.render(scene, camera);
         }
-
         animate();
 
         window.addEventListener('resize', () => {
