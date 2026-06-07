@@ -2,277 +2,249 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Vampire Survivors Co-op</title>
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <title>3D Dungeon RPG</title>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #222; color: #fff; margin: 0; }
-        canvas { background: #2b2b2b; border: 2px solid #555; display: block; margin: 20px auto; image-rendering: pixelated; }
-        #menu { padding: 30px; }
-        input { padding: 10px; width: 250px; margin: 5px; font-size: 16px; }
-        button { padding: 10px 20px; margin: 5px; cursor: pointer; background: #4CAF50; color: white; border: none; font-size: 16px; border-radius: 5px; }
-        button:hover { background: #45a049; }
-        button:disabled { background: #555; cursor: not-allowed; }
-        button.reset { background: #f44336; }
-        .id-text { font-size: 22px; margin-top: 15px; }
-        .my-id { color: #4CAF50; font-weight: bold; letter-spacing: 1px; font-size: 26px; }
-        .status { color: yellow; margin-top: 10px; font-size: 18px; min-height: 25px; }
-
-        #game-container { position: relative; display: inline-block; margin-top: 20px; }
-        #chat-box { position: absolute; bottom: 10px; left: 10px; width: 300px; background: rgba(0, 0, 0, 0.6); border-radius: 5px; padding: 10px; display: none; flex-direction: column; pointer-events: none; }
-        #chat-messages { flex-grow: 1; max-height: 120px; overflow-y: auto; margin-bottom: 5px; text-align: left; font-size: 14px; }
-        #chat-messages div { margin-bottom: 2px; word-wrap: break-word; }
-        .msg-host { color: #4CAF50; } .msg-client { color: #2196F3; }
-        #chat-input { width: 100%; box-sizing: border-box; padding: 5px; font-size: 14px; background: rgba(255, 255, 255, 0.9); color: #000; border: none; border-radius: 3px; pointer-events: auto; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        canvas { display: block; }
+        
+        /* UI для исследования */
+        #explore-ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; }
+        
+        /* UI для пошаговой битвы */
+        #battle-ui { 
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 200px; 
+            background: rgba(0, 0, 0, 0.85); border-top: 3px solid #aaa;
+            display: none; color: white; padding: 20px; box-sizing: border-box;
+        }
+        .battle-btn {
+            padding: 15px 30px; font-size: 20px; cursor: pointer; 
+            background: #333; color: white; border: 2px solid #888; margin-right: 10px;
+        }
+        .battle-btn:hover { background: #555; }
+        #battle-log { margin-top: 15px; font-size: 18px; color: #ffaa00; }
     </style>
 </head>
 <body>
-
-    <div id="menu">
-        <h2>Vampire Survivors Co-op</h2>
-        <button id="hostBtn" onclick="startGame(true)">Я — ХОСТ (Создать лобби)</button>
-        <br><br>
-        <input type="text" id="hostIdInput" placeholder="Вставь код лобби (от друга)">
-        <button id="clientBtn" onclick="startGame(false)">Подключиться к Хосту</button>
-        <br><br>
-        <button class="reset" onclick="location.reload()">Сброс/Отключиться</button>
-        
-        <div id="room-code-block" class="id-text" style="display: none;">
-            Код вашей комнаты: <br><span id="myIdSpan" class="my-id">еще нет...</span>
-        </div>
-        <div id="status" class="status">Ожидание...</div>
-        <div style="margin-top: 20px; font-size: 14px; color: #888;">
-            <b>Если зависает на "Подключение..."</b> — значит провайдер блокирует прямое соединение.<br>
-            Включите VPN у того, кто создает комнату (Хоста), и попробуйте снова.
-        </div>
+    <div id="explore-ui">
+        <h2>Подземелье</h2>
+        <p>WASD - движение</p>
+        <p style="color: #ff4444">Столкнись с красным кубом!</p>
     </div>
 
-    <div id="game-container" style="display:none;">
-        <canvas id="gameCanvas" width="800" height="600"></canvas>
-        <div id="chat-box">
-            <div id="chat-messages"></div>
-            <input type="text" id="chat-input" placeholder="Enter - написать, Esc - закрыть" maxlength="100">
+    <div id="battle-ui">
+        <h2>ПОШАГОВАЯ БИТВА</h2>
+        <div>
+            <button class="battle-btn" onclick="playerAction('attack')">⚔️ Атака</button>
+            <button class="battle-btn" onclick="playerAction('flee')">🏃 Бегство</button>
         </div>
+        <div id="battle-log">Ваш ход!</div>
     </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const myIdSpan = document.getElementById('myIdSpan');
-        const statusP = document.getElementById('status');
-        const menuDiv = document.getElementById('menu');
-        const hostBtn = document.getElementById('hostBtn');
-        const clientBtn = document.getElementById('clientBtn');
-        const gameContainer = document.getElementById('game-container');
-        const roomCodeBlock = document.getElementById('room-code-block');
-        const chatBox = document.getElementById('chat-box');
-        const chatMessages = document.getElementById('chat-messages');
-        const chatInput = document.getElementById('chat-input');
+        // --- 1. НАСТРОЙКА 3D ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111111);
+        scene.fog = new THREE.Fog(0x111111, 10, 25); // Туман для атмосферы
 
-        let peer = null;
-        let conn = null;
-        let isHost = false;
-        let gameRunning = false;
-        let isChatFocused = false;
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 12, 12);
+        camera.lookAt(0, 0, 0);
 
-        let gameState = {
-            p1: { x: 200, y: 300, color: '#4CAF50', size: 24, hp: 100, maxHp: 100, invTime: 0, dead: false },
-            p2: { x: 600, y: 300, color: '#2196F3', size: 24, hp: 100, maxHp: 100, invTime: 0, dead: false },
-            enemies: [], projectiles: [], obstacles: [],
-            score: 0, swordCooldown: 0, bowCooldown: 0, enemySpawnTimer: 0
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Свет
+        scene.add(new THREE.AmbientLight(0x404040, 0.3));
+        const torchLight = new THREE.PointLight(0xffaa00, 1.5, 20);
+        torchLight.position.set(0, 3, 0);
+        torchLight.castShadow = true;
+        scene.add(torchLight);
+
+        // Пол
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(30, 30),
+            new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9 })
+        );
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Стены (кубики для декора)
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+        for (let i = -10; i <= 10; i += 2) {
+            addWall(i, -10);
+            addWall(i, 10);
+            addWall(-10, i);
+            addWall(10, i);
+        }
+        function addWall(x, z) {
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), wallMat);
+            wall.position.set(x, 1, z);
+            wall.castShadow = true; wall.receiveShadow = true;
+            scene.add(wall);
+        }
+
+        // --- 2. ИГРОК И МОБ ---
+        const player = new THREE.Mesh(
+            new THREE.BoxGeometry(0.8, 1.2, 0.8),
+            new THREE.MeshStandardMaterial({ color: 0x4CAF50 })
+        );
+        player.position.y = 0.6;
+        player.castShadow = true;
+        scene.add(player);
+
+        const enemy = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 1.5, 1),
+            new THREE.MeshStandardMaterial({ color: 0xCC0000 })
+        );
+        enemy.position.set(4, 0.75, 2);
+        enemy.castShadow = true;
+        scene.add(enemy);
+
+        // --- 3. ЛОГИКА ИГРЫ ---
+        let gameState = 'explore'; // 'explore' или 'battle'
+        let keys = {};
+        let playerHP = 100;
+        let enemyHP = 50;
+
+        window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+        // --- 4. ОБНОВЛЕНИЕ (ГЕЙМПЛЕЙ) ---
+        function update() {
+            if (gameState === 'explore') {
+                updateExploration();
+                checkBattleStart();
+            }
+            
+            // Камера плавно следует за игроком
+            camera.position.x += (player.position.x - camera.position.x + 5) * 0.05;
+            camera.position.z += (player.position.z - camera.position.z + 8) * 0.05;
+            camera.lookAt(player.position.x, 0, player.position.z);
+
+            torchLight.position.x = player.position.x;
+            torchLight.position.z = player.position.z;
+        }
+
+        function updateExploration() {
+            const speed = 0.1;
+            let moveX = 0, moveZ = 0;
+
+            if (keys['w'] || keys['ц']) moveZ = -speed;
+            if (keys['s'] || keys['ы']) moveZ = speed;
+            if (keys['a'] || keys['ф']) moveX = -speed;
+            if (keys['d'] || keys['в']) moveX = speed;
+
+            // Простая проверка столкновений со стенами (чтобы не выходить за границы 9х9)
+            let nextX = player.position.x + moveX;
+            let nextZ = player.position.z + moveZ;
+            if (nextX > -9 && nextX < 9) player.position.x = nextX;
+            if (nextZ > -9 && nextZ < 9) player.position.z = nextZ;
+        }
+
+        function checkBattleStart() {
+            const dist = Math.hypot(player.position.x - enemy.position.x, player.position.z - enemy.position.z);
+            if (dist < 1.5) {
+                startBattle();
+            }
+        }
+
+        // --- 5. ПОШАГОВАЯ БИТВА ---
+        function startBattle() {
+            gameState = 'battle';
+            document.getElementById('explore-ui').style.display = 'none';
+            document.getElementById('battle-ui').style.display = 'block';
+            document.getElementById('battle-log').innerText = "Враг впереди! Ваш ход.";
+            
+            // Слегка откидываем игрока назад, чтобы не застревать в мобе
+            player.position.z -= 1;
+        }
+
+        window.playerAction = function(action) {
+            if (gameState !== 'battle') return;
+
+            if (action === 'attack') {
+                const damage = Math.floor(Math.random() * 20) + 10; // 10-30 урона
+                enemyHP -= damage;
+                document.getElementById('battle-log').innerText = `Вы ударили врага на ${damage} урона! (У врага: ${Math.max(0, enemyHP)} ХП)`;
+
+                if (enemyHP <= 0) {
+                    setTimeout(() => endBattle(true), 1000);
+                    return;
+                }
+                
+                // Ход врага (задержка для эффекта)
+                setTimeout(enemyTurn, 1000);
+
+            } else if (action === 'flee') {
+                const success = Math.random() > 0.5; // 50% шанс сбежать
+                if (success) {
+                    document.getElementById('battle-log').innerText = "Вы сбежали!";
+                    setTimeout(() => endBattle(false), 1000);
+                } else {
+                    document.getElementById('battle-log').innerText = "Сбежать не удалось!";
+                    setTimeout(enemyTurn, 1000);
+                }
+            }
+
+            // Блокируем кнопки на время хода
+            document.querySelectorAll('.battle-btn').forEach(btn => btn.disabled = true);
         };
 
-        let myKeys = {};
-        let friendKeys = {};
+        function enemyTurn() {
+            const damage = Math.floor(Math.random() * 15) + 5; // 5-20 урона
+            playerHP -= damage;
+            document.getElementById('battle-log').innerText = `Враг ударил вас на ${damage} урона! (У вас: ${Math.max(0, playerHP)} ХП)`;
 
-        window.addEventListener('keydown', e => {
-            if (isChatFocused) { if (e.key === 'Escape') chatInput.blur(); return; }
-            myKeys[e.key] = true; 
-            if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].indexOf(e.key) > -1) e.preventDefault();
-            if (e.key === 'Enter') chatInput.focus();
-        });
-        window.addEventListener('keyup', e => { if (isChatFocused) return; myKeys[e.key] = false; });
-
-        chatInput.addEventListener('focus', () => { isChatFocused = true; myKeys = {}; });
-        chatInput.addEventListener('blur', () => { isChatFocused = false; });
-        chatInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && chatInput.value.trim() !== '') {
-                const msg = chatInput.value.trim();
-                const sender = isHost ? 'Хост' : 'Клиент';
-                conn.send({ type: 'chat', sender: sender, text: msg });
-                addChatMessage(sender, msg);
-                chatInput.value = ''; chatInput.blur();
-            }
-            e.stopPropagation();
-        });
-
-        function addChatMessage(sender, text) {
-            const div = document.createElement('div');
-            div.className = sender === 'Хост' ? 'msg-host' : 'msg-client';
-            div.innerHTML = `<b>${sender}:</b> ${text}`;
-            chatMessages.appendChild(div);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        function startGame(hostMode) {
-            isHost = hostMode;
-            hostBtn.disabled = true;
-            clientBtn.disabled = true;
-            
-            if (isHost) {
-                roomCodeBlock.style.display = 'block';
-                statusP.innerText = 'Создание комнаты...';
-            } else {
-                statusP.innerText = 'Подключение...';
-            }
-            statusP.style.color = 'yellow';
-            createPeer();
-        }
-
-        function createPeer() {
-            if (isHost) {
-                const shortId = Math.floor(10000 + Math.random() * 90000).toString();
-                peer = new Peer(shortId, { secure: true });
-            } else {
-                peer = new Peer({ secure: true });
-            }
-
-            peer.on('open', (id) => {
-                if (isHost) {
-                    myIdSpan.innerText = id;
-                    statusP.innerText = 'Лобби создано! Скинь код другу...';
-                    statusP.style.color = '#4CAF50';
-                    peer.on('connection', (connection) => { conn = connection; waitForConnection(); });
-                } else {
-                    const hostId = document.getElementById('hostIdInput').value.trim();
-                    if (!hostId) { alert('Введи код лобби!'); location.reload(); return; }
-                    statusP.innerText = 'Ищем Хоста...';
-                    conn = peer.connect(hostId, { reliable: true });
-                    waitForConnection();
-                }
-            });
-            peer.on('error', (err) => {
-                statusP.innerHTML = '<b>ОШИБКА: ' + err.type + '</b><br>Попробуйте включить VPN и нажать Сброс.';
-                statusP.style.color = 'red';
-            });
-        }
-
-        function waitForConnection() {
-            statusP.innerText = 'Соединение... Пробиваем NAT...';
-            statusP.style.color = 'yellow';
-
-            conn.on('open', () => {
-                statusP.innerText = 'Соединение установлено!';
-                statusP.style.color = '#4CAF50';
+            if (playerHP <= 0) {
                 setTimeout(() => {
-                    menuDiv.style.display = 'none';
-                    gameContainer.style.display = 'block';
-                    chatBox.style.display = 'flex';
-                    if (!gameRunning) { gameRunning = true; if (isHost) generateObstacles(); gameLoop(); }
-                }, 500);
-            });
-
-            conn.on('data', (data) => {
-                if (data.type === 'chat') addChatMessage(data.sender, data.text);
-                else if (data.type === 'input') friendKeys = data.keys;
-                else if (data.type === 'game') {
-                    if (!isHost) {
-                        let serverState = data.payload;
-                        gameState.p1 = serverState.p1; 
-                        gameState.enemies = serverState.enemies; 
-                        gameState.projectiles = serverState.projectiles; 
-                        gameState.score = serverState.score;
-                        gameState.swordCooldown = serverState.swordCooldown;
-                        gameState.p2.hp = serverState.p2.hp;
-                        gameState.p2.dead = serverState.p2.dead;
-                        gameState.p2.invTime = serverState.p2.invTime;
-                    }
-                }
-            });
-
-            conn.on('close', () => { statusP.innerText = 'Друг отключился!'; statusP.style.color = 'red'; gameRunning = false; });
-        }
-
-        function generateObstacles() {
-            for (let i = 0; i < 10; i++) gameState.obstacles.push({ x: Math.random() * 760 + 20, y: Math.random() * 560 + 20, type: 'tree' });
-            for (let i = 0; i < 5; i++) gameState.obstacles.push({ x: Math.random() * 760 + 20, y: Math.random() * 560 + 20, type: 'grave' });
-        }
-
-        function findNearestEnemy(fromX, fromY) {
-            let nearest = null, minDist = Infinity;
-            gameState.enemies.forEach(e => { let dist = Math.hypot(e.x - fromX, e.y - fromY); if (dist < minDist) { minDist = dist; nearest = e; } });
-            return nearest;
-        }
-
-        function gameLoop() {
-            if (!gameRunning) return;
-            let speed = 4;
-
-            if (isHost) {
-                if (!gameState.p1.dead) {
-                    if (myKeys['ArrowLeft'] || myKeys['a'] || myKeys['ф']) gameState.p1.x -= speed;
-                    if (myKeys['ArrowRight'] || myKeys['d'] || myKeys['в']) gameState.p1.x += speed;
-                    if (myKeys['ArrowUp'] || myKeys['w'] || myKeys['ц']) gameState.p1.y -= speed;
-                    if (myKeys['ArrowDown'] || myKeys['s'] || myKeys['ы']) gameState.p1.y += speed;
-                }
-                if (!gameState.p2.dead) {
-                    if (friendKeys['ArrowLeft'] || friendKeys['a'] || friendKeys['ф']) gameState.p2.x -= speed;
-                    if (friendKeys['ArrowRight'] || friendKeys['d'] || friendKeys['в']) gameState.p2.x += speed;
-                    if (friendKeys['ArrowUp'] || friendKeys['w'] || friendKeys['ц']) gameState.p2.y -= speed;
-                    if (friendKeys['ArrowDown'] || friendKeys['s'] || friendKeys['ы']) gameState.p2.y += speed;
-                }
+                    alert("Вы погибли! Игра начнется заново.");
+                    playerHP = 100; enemyHP = 50;
+                    endBattle(false);
+                }, 1000);
             } else {
-                if (!gameState.p2.dead) {
-                    if (myKeys['ArrowLeft'] || myKeys['a'] || myKeys['ф']) gameState.p2.x -= speed;
-                    if (myKeys['ArrowRight'] || myKeys['d'] || myKeys['в']) gameState.p2.x += speed;
-                    if (myKeys['ArrowUp'] || myKeys['w'] || myKeys['ц']) gameState.p2.y -= speed;
-                    if (myKeys['ArrowDown'] || myKeys['s'] || myKeys['ы']) gameState.p2.y += speed;
-                }
-                conn.send({ type: 'input', keys: myKeys });
+                // Разблокируем кнопки для следующего хода игрока
+                document.querySelectorAll('.battle-btn').forEach(btn => btn.disabled = false);
             }
-
-            if (isHost) {
-                gameState.enemySpawnTimer++;
-                if (gameState.enemySpawnTimer >= 40 && gameState.enemies.length < 50) {
-                    let side = Math.floor(Math.random() * 4);
-                    let ex = side === 0 ? -20 : side === 1 ? 820 : Math.random() * 800;
-                    let ey = side === 2 ? -20 : side === 3 ? 620 : Math.random() * 600;
-                    gameState.enemies.push({ x: ex, y: ey, size: 16, speed: 1.2 + Math.random() * 0.8, hp: 3, maxHp: 3 });
-                    gameState.enemySpawnTimer = 0;
-                }
-                gameState.bowCooldown--;
-                if (gameState.bowCooldown <= 0 && gameState.enemies.length > 0 && !gameState.p1.dead) {
-                    let target = findNearestEnemy(gameState.p1.x, gameState.p1.y);
-                    if (target) { let angle = Math.atan2(target.y - gameState.p1.y, target.x - gameState.p1.x); gameState.projectiles.push({ x: gameState.p1.x, y: gameState.p1.y, vx: Math.cos(angle)*8, vy: Math.sin(angle)*8, size: 5, damage: 1 }); gameState.bowCooldown = 20; }
-                }
-                gameState.swordCooldown--;
-                if (gameState.swordCooldown <= 0 && !gameState.p2.dead) {
-                    let hitSomething = false; gameState.enemies.forEach(e => { if (Math.hypot(e.x - gameState.p2.x, e.y - gameState.p2.y) < 60) { e.hp -= 2; hitSomething = true; } }); if (hitSomething) gameState.swordCooldown = 25;
-                }
-                gameState.projectiles = gameState.projectiles.filter(p => { p.x += p.vx; p.y += p.vy; let hit = false; gameState.enemies.forEach(e => { if (Math.hypot(p.x - e.x, p.y - e.y) < e.size + p.size) { e.hp -= p.damage; hit = true; } }); return !hit && p.x > -50 && p.x < 850 && p.y > -50 && p.y < 650; });
-                let alivePlayers = []; if (!gameState.p1.dead) alivePlayers.push(gameState.p1); if (!gameState.p2.dead) alivePlayers.push(gameState.p2);
-                gameState.enemies.forEach(e => {
-                    if (alivePlayers.length === 0) return; let target = alivePlayers[0], minDist = Math.hypot(e.x - target.x, e.y - target.y);
-                    for(let i=1; i<alivePlayers.length; i++){ let d = Math.hypot(e.x - alivePlayers[i].x, e.y - alivePlayers[i].y); if(d < minDist) { minDist = d; target = alivePlayers[i]; } }
-                    if (e.x < target.x) e.x += e.speed; if (e.x > target.x) e.x -= e.speed; if (e.y < target.y) e.y += e.speed; if (e.y > target.y) e.y -= e.speed;
-                    alivePlayers.forEach(p => { if (Math.hypot(e.x - p.x, e.y - p.y) < e.size + p.size/2 && p.invTime <= 0) { p.hp -= 15; p.invTime = 60; if (p.hp <= 0) p.dead = true; } });
-                });
-                gameState.enemies = gameState.enemies.filter(e => { if (e.hp <= 0) { gameState.score++; return false; } return true; });
-                if (gameState.p1.invTime > 0) gameState.p1.invTime--; if (gameState.p2.invTime > 0) gameState.p2.invTime--;
-
-                conn.send({ type: 'game', payload: gameState });
-            }
-
-            ctx.clearRect(0, 0, 800, 600);
-            gameState.obstacles.forEach(o => { if (o.type === 'tree') { ctx.fillStyle = '#1b5e20'; ctx.beginPath(); ctx.arc(o.x, o.y, 15, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#4e342e'; ctx.fillRect(o.x-3, o.y, 6, 10); } else { ctx.fillStyle = '#757575'; ctx.fillRect(o.x-8, o.y-10, 16, 20); ctx.fillStyle = '#9e9e9e'; ctx.fillRect(o.x-12, o.y-10, 24, 5); } });
-            ctx.fillStyle = '#f44336'; gameState.enemies.forEach(e => { ctx.fillRect(e.x - e.size/2, e.y - e.size/2, e.size, e.size); ctx.fillStyle = '#000'; ctx.fillRect(e.x - e.size/2, e.y - e.size/2 - 5, e.size, 3); ctx.fillStyle = '#ff0000'; ctx.fillRect(e.x - e.size/2, e.y - e.size/2 - 5, e.size * (e.hp/e.maxHp), 3); ctx.fillStyle = '#f44336'; });
-            ctx.fillStyle = '#FFEB3B'; gameState.projectiles.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); });
-            if (gameState.swordCooldown > 15 && !gameState.p2.dead) { ctx.strokeStyle = 'rgba(33, 150, 243, 0.5)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(gameState.p2.x, gameState.p2.y, 60, 0, Math.PI*2); ctx.stroke(); }
-            [gameState.p1, gameState.p2].forEach(p => { if (p.dead) ctx.globalAlpha = 0.3; else if (p.invTime > 0 && Math.floor(p.invTime / 4) % 2 === 0) ctx.globalAlpha = 0.3; ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size); ctx.globalAlpha = 1.0; if (!p.dead) { ctx.fillStyle = '#000'; ctx.fillRect(p.x - 15, p.y - p.size/2 - 8, 30, 4); ctx.fillStyle = p.hp > 30 ? '#4CAF50' : '#f44336'; ctx.fillRect(p.x - 15, p.y - p.size/2 - 8, 30 * (p.hp/p.maxHp), 4); } });
-            ctx.fillStyle = '#fff'; ctx.font = '20px sans-serif'; ctx.fillText('Убито: ' + gameState.score, 20, 30);
-            if (isHost) ctx.fillText('Оружие: Лук (Авто)', 20, 580); else ctx.fillText('Оружие: Меч (Авто)', 20, 580);
-            if (gameState.p1.dead && gameState.p2.dead) { ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, 800, 600); ctx.fillStyle = '#f44336'; ctx.font = '50px sans-serif'; ctx.fillText('GAME OVER', 250, 300); ctx.fillStyle = '#fff'; ctx.font = '24px sans-serif'; ctx.fillText('Врагов убито: ' + gameState.score, 300, 340); }
-            requestAnimationFrame(gameLoop);
         }
+
+        function endBattle(enemyKilled) {
+            gameState = 'explore';
+            document.getElementById('explore-ui').style.display = 'block';
+            document.getElementById('battle-ui').style.display = 'none';
+            document.querySelectorAll('.battle-btn').forEach(btn => btn.disabled = false);
+
+            if (enemyKilled) {
+                scene.remove(enemy); // Убираем моба с 3D-карты
+                // В мультиплеере здесь Хост отправит: { type: 'enemy_dead', id: 1 }
+            }
+        }
+
+        // --- 6. ГЛАВНЫЙ ЦИКЛ ---
+        function animate() {
+            requestAnimationFrame(animate);
+            update();
+            
+            // Простая анимация врага (парение)
+            if (enemy.parent) {
+                enemy.position.y = 0.75 + Math.sin(Date.now() * 0.005) * 0.2;
+                enemy.rotation.y += 0.02;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
